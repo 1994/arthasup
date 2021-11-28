@@ -10,13 +10,8 @@ func main() {
 }
 
 func execute() {
-	// start := time.Now()
 	common.Pre()
 	name, err := common.Download()
-
-	// cost := time.Since(start)
-
-	// fmt.Printf("download cost: %v,end at: %v\n", cost, time.Now())
 	if err != nil && name == "" {
 		panic(err)
 	}
