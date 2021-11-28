@@ -4,13 +4,16 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
-	"golang.org/x/xerrors"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"golang.org/x/xerrors"
 )
 
 const (
@@ -91,12 +94,12 @@ func Download() (string, error) {
 	return name, nil
 }
 
-func Unzip(file string) error {
+func Unzip(file string) (string, error) {
 	fmt.Println(file)
 	version := strings.Split(filepath.Base(file), "-")[2]
 	home, err := ArthasHome()
 	if err != nil {
-		return xerrors.Errorf("unzip error", err)
+		return "", xerrors.Errorf("unzip error, %w", err)
 	}
 	dst := filepath.Join(home, version)
 	_ = os.MkdirAll(dst, os.ModePerm)
@@ -114,7 +117,7 @@ func Unzip(file string) error {
 		fmt.Println("unzipping file ", filePath)
 
 		if !strings.HasPrefix(filePath, filepath.Clean(dst)+string(os.PathSeparator)) {
-			return xerrors.New("invalid file path")
+			return "", xerrors.New("invalid file path")
 		}
 		if f.FileInfo().IsDir() {
 			fmt.Println("creating directory...")
@@ -123,27 +126,27 @@ func Unzip(file string) error {
 		}
 
 		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
-			return xerrors.New("invalid file path")
+			return "", xerrors.New("invalid file path")
 		}
 
 		dstFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
-			return xerrors.New("invalid file path")
+			return "", xerrors.New("invalid file path")
 		}
 
 		fileInArchive, err := f.Open()
 		if err != nil {
-			return xerrors.New("invalid file path")
+			return "", xerrors.New("invalid file path")
 		}
 
 		if _, err := io.Copy(dstFile, fileInArchive); err != nil {
-			return xerrors.New("invalid file path")
+			return "", xerrors.New("invalid file path")
 		}
 
-		dstFile.Close()
-		fileInArchive.Close()
+		_ = dstFile.Close()
+		_ = fileInArchive.Close()
 	}
-	return nil
+	return version, nil
 }
 
 func fileName(urlPath string) string {
@@ -161,4 +164,57 @@ func exist(p string) bool {
 		return false
 	}
 	return true
+}
+
+func Alias(version string) {
+	os := runtime.GOOS
+	//  todo
+	match := strings.HasPrefix(os, "linux") || strings.HasPrefix(os, "darwin")
+
+	if !match {
+		return
+	}
+
+	p := Profile()
+	if p == "" {
+		return
+	}
+
+	home, _ := ArthasHome()
+
+	boot := filepath.Join(home, version, "arthas-boot.jar")
+
+	AppendStringToFile(p, fmt.Sprintf("alias arthas='java -jar %s'", boot))
+	exec.Command("source", p).Run()
+}
+
+func Profile() string {
+	c := os.ExpandEnv("$SHELL")
+	home, _ := os.UserHomeDir()
+
+	var result string
+
+	switch {
+	case strings.ContainsAny(c, "zsh"):
+		result = filepath.Join(home, ".zshrc")
+	case strings.ContainsAny(c, "bash"):
+		result = filepath.Join(home, ".bashrc")
+	default:
+		result = ""
+	}
+	return result
+}
+
+func AppendStringToFile(path, text string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(text)
+	if err != nil {
+		return err
+	}
+	return nil
 }
