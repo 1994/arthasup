@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/schollz/progressbar/v3"
 	"golang.org/x/xerrors"
 )
 
@@ -39,6 +40,10 @@ func ArthasHome() (string, error) {
 }
 
 func Download() (string, error) {
+
+	precheck := progressbar.Default(2, "check before installing arthas")
+
+	// fmt.Printf("start network: %v\n", time.Now())
 	get, err := http.Get(DownloadUrl)
 	if err != nil {
 		return "", xerrors.Errorf("download error, %w", err)
@@ -48,6 +53,7 @@ func Download() (string, error) {
 		return "", xerrors.New("download error, please make sure your network available")
 	}
 
+	precheck.Add(1)
 	newPath := get.Request.URL.String()
 
 	home, err := Home()
@@ -55,12 +61,17 @@ func Download() (string, error) {
 		return "", xerrors.Errorf("download error, %w", err)
 	}
 
+	// fmt.Printf("check network end: %v\n", time.Now())
 	name := filepath.Join(home, fileName(newPath))
 
 	if exist(name) {
+		precheck.Add(1)
 		return name, xerrors.New("file exist, just return")
 	}
+	// fmt.Printf("check exist at: %v\n", time.Now())
 
+	precheck.Add(1)
+	// fmt.Printf("real download at: %v\n", time.Now())
 	response, err := http.Get(newPath)
 
 	if err != nil {
@@ -89,13 +100,16 @@ func Download() (string, error) {
 		_ = create.Close()
 	}(create)
 
-	_, _ = io.Copy(create, response.Body)
-
+	bar := progressbar.DefaultBytes(
+		response.ContentLength,
+		"downloading",
+	)
+	_, _ = io.Copy(io.MultiWriter(create, bar), response.Body)
+	fmt.Printf("download success, save at: %v\n", name)
 	return name, nil
 }
 
 func Unzip(file string) (string, error) {
-	fmt.Println(file)
 	version := strings.Split(filepath.Base(file), "-")[2]
 	home, err := ArthasHome()
 	if err != nil {
@@ -103,7 +117,7 @@ func Unzip(file string) (string, error) {
 	}
 	dst := filepath.Join(home, version)
 	_ = os.MkdirAll(dst, os.ModePerm)
-
+	fmt.Printf("arthas version: %v, start to unzip\n", version)
 	archive, err := zip.OpenReader(file)
 	if err != nil {
 		panic(err)
@@ -112,15 +126,18 @@ func Unzip(file string) (string, error) {
 		_ = archive.Close()
 	}(archive)
 
+	bar := progressbar.Default(int64(len(archive.File)), "unzip file")
+
 	for _, f := range archive.File {
+		bar.Add(1)
 		filePath := filepath.Join(dst, f.Name)
-		fmt.Println("unzipping file ", filePath)
+		// fmt.Println("unzipping file ", filePath)
 
 		if !strings.HasPrefix(filePath, filepath.Clean(dst)+string(os.PathSeparator)) {
 			return "", xerrors.New("invalid file path")
 		}
 		if f.FileInfo().IsDir() {
-			fmt.Println("creating directory...")
+			// fmt.Println("creating directory...")
 			_ = os.MkdirAll(filePath, os.ModePerm)
 			continue
 		}
@@ -146,6 +163,7 @@ func Unzip(file string) (string, error) {
 		_ = dstFile.Close()
 		_ = fileInArchive.Close()
 	}
+	bar.Finish()
 	return version, nil
 }
 
@@ -184,8 +202,11 @@ func Alias(version string) {
 
 	boot := filepath.Join(home, version, "arthas-boot.jar")
 
-	AppendStringToFile(p, fmt.Sprintf("alias arthas='java -jar %s'", boot))
+	AppendStringToFile(p, fmt.Sprintf("alias arthas='%s -jar %s'\n",
+		Java,
+		boot))
 	exec.Command("source", p).Run()
+	fmt.Println("add arthas alias success, you can run 'arthas' after restarting terminal")
 }
 
 func Profile() string {
