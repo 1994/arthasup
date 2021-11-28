@@ -1,19 +1,17 @@
 package main
 
 import (
-	"fmt"
-	"time"
-
 	"1994.arthasup/common"
 )
 
 func main() {
-	fmt.Printf("start execute at: %v\n", time.Now())
+	common.Init()
 	execute()
 }
 
 func execute() {
 	// start := time.Now()
+	common.Pre()
 	name, err := common.Download()
 
 	// cost := time.Since(start)

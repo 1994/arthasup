@@ -2,9 +2,11 @@ package common
 
 import (
 	"archive/zip"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/xerrors"
@@ -22,6 +25,25 @@ const (
 	Arthas      = ".arthas"
 	DownloadUrl = "https://arthas.aliyun.com/download/latest_version?mirror=aliyun"
 )
+
+func Pre() {
+
+	if Java == "java" {
+		_, err := exec.LookPath(Java)
+		if err != nil {
+			fmt.Printf("please specify Java home")
+			panic(err)
+		}
+
+	}
+	home, _ := Home()
+	arthas, _ := ArthasHome()
+	if Force {
+		fmt.Printf("start to cleanup arthas dir: %v and %v", home, arthas)
+		os.RemoveAll(home)
+		os.RemoveAll(arthas)
+	}
+}
 
 func Home() (string, error) {
 	home, err := os.UserHomeDir()
@@ -185,9 +207,9 @@ func exist(p string) bool {
 }
 
 func Alias(version string) {
-	os := runtime.GOOS
+	goos := runtime.GOOS
 	//  todo
-	match := strings.HasPrefix(os, "linux") || strings.HasPrefix(os, "darwin")
+	match := strings.HasPrefix(goos, "linux") || strings.HasPrefix(goos, "darwin")
 
 	if !match {
 		return
@@ -198,15 +220,20 @@ func Alias(version string) {
 		return
 	}
 
-	home, _ := ArthasHome()
+	appendAlias(p, version)
 
-	boot := filepath.Join(home, version, "arthas-boot.jar")
-
-	AppendStringToFile(p, fmt.Sprintf("alias arthas='%s -jar %s'\n",
-		Java,
-		boot))
 	exec.Command("source", p).Run()
 	fmt.Println("add arthas alias success, you can run 'arthas' after restarting terminal")
+
+	var binary string
+	if Java == "java" {
+		b, _ := exec.LookPath(Java)
+		binary = b
+	} else {
+		binary = Java
+	}
+	args := []string{binary, "-jar", arthasBootJar(version)}
+	syscall.Exec(binary, args, os.Environ())
 }
 
 func Profile() string {
@@ -226,16 +253,31 @@ func Profile() string {
 	return result
 }
 
-func AppendStringToFile(path, text string) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+func appendAlias(path, version string) error {
+	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	_, err = f.WriteString(text)
-	if err != nil {
-		return err
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		str := scanner.Text()
+		if !strings.HasPrefix(str, "alias arthas") {
+			lines = append(lines, scanner.Text())
+		}
+	}
+
+	lines = append(lines, fmt.Sprintf("alias arthas='%s -jar %s'\n", Java, arthasBootJar(version)))
+
+	e := ioutil.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	if e != nil {
+		return e
 	}
 	return nil
+}
+
+func arthasBootJar(version string) string {
+	home, _ := ArthasHome()
+	return filepath.Join(home, version, "arthas-boot.jar")
 }

@@ -7,7 +7,7 @@ var (
 	Java  string
 )
 
-func init() {
+func Init() {
 	flag.BoolVar(&Force, "f", false, "reinstall latest arthas")
 	flag.StringVar(&Java, "j", "java", "specify java home")
 	flag.Parse()
